@@ -41,11 +41,15 @@
 {
   WKWebView *_webView;
   NSString *_injectedJavaScript;
+  IMP wkOriginalImplementation, uiOriginalImplementation, nilImplementation;
+  Method wkMethod, uiMethod;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
 {
-  return self = [super initWithFrame:frame];
+  self = [super initWithFrame:frame];
+  [self swizzleInputAccessoryView];
+  return self;
 }
 
 RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
@@ -88,37 +92,30 @@ RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
   [_webView loadRequest:request];
 }
 
--(void)setHideKeyboardAccessoryView:(BOOL)hideKeyboardAccessoryView
-{
-  if (!hideKeyboardAccessoryView) {
-    return;
-  }
+- (void)swizzleInputAccessoryView {
+  Class wkClass = NSClassFromString([@[@"UI", @"Web", @"Browser", @"View"] componentsJoinedByString:@""]);
+  wkMethod = class_getInstanceMethod(wkClass, @selector(inputAccessoryView));
+  wkOriginalImplementation = method_getImplementation(wkMethod);
 
-  UIView* subview;
-  for (UIView* view in _webView.scrollView.subviews) {
-    if([[view.class description] hasPrefix:@"WKContent"])
-      subview = view;
-  }
+  Class uiClass = NSClassFromString([@[@"WK", @"Content", @"View"] componentsJoinedByString:@""]);
+  uiMethod = class_getInstanceMethod(uiClass, @selector(inputAccessoryView));
+  uiOriginalImplementation = method_getImplementation(uiMethod);
 
-  if(subview == nil) return;
-
-  NSString* name = [NSString stringWithFormat:@"%@_SwizzleHelperWK", subview.class.superclass];
-  Class newClass = NSClassFromString(name);
-
-  if(newClass == nil)
-  {
-    newClass = objc_allocateClassPair(subview.class, [name cStringUsingEncoding:NSASCIIStringEncoding], 0);
-    if(!newClass) return;
-
-    Method method = class_getInstanceMethod([_SwizzleHelperWK class], @selector(inputAccessoryView));
-      class_addMethod(newClass, @selector(inputAccessoryView), method_getImplementation(method), method_getTypeEncoding(method));
-
-    objc_registerClassPair(newClass);
-  }
-
-  object_setClass(subview, newClass);
+  nilImplementation = imp_implementationWithBlock(^(id _s) {
+    return nil;
+  });
 }
 
+-(void)setHideKeyboardAccessoryView:(BOOL)hideKeyboardAccessoryView
+{
+  if (hideKeyboardAccessoryView) {
+    method_setImplementation(wkMethod, nilImplementation);
+    method_setImplementation(uiMethod, nilImplementation);
+  } else {
+    method_setImplementation(wkMethod, wkOriginalImplementation);
+    method_setImplementation(uiMethod, uiOriginalImplementation);
+  }
+}
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message
 {
